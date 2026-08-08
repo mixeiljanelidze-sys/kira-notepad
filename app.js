@@ -1,7 +1,7 @@
-import { notepadService } from './services/notepadService.js';
-import { ntfyService } from './services/ntfyService.js';
-import { configService } from './services/configService.js';
-import { webhookService } from './services/webhookService.js';
+import { notepadService } from './notepadService.js';
+import { ntfyService } from './ntfyService.js';
+import { configService } from './configService.js';
+import { webhookService } from './webhookService.js';
 
 let activeNoteId = null;
 let pollTimer = null;
