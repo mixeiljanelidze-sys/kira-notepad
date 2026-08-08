@@ -27,10 +27,15 @@
 <div id="view-editor" class="view">
   <div id="editor-toolbar">
     <button id="btn-back">← BACK</button>
+    <button id="btn-attach-image">🖼 IMG</button>
+    <button id="btn-attach-video">🎬 VID</button>
     <button id="btn-send-webhook">⚡ SEND</button>
     <button id="btn-delete-note">🗑</button>
   </div>
+  <input type="file" id="file-image" accept="image/*" hidden>
+  <input type="file" id="file-video" accept="video/*" hidden>
   <input id="editor-title" placeholder="Title">
+  <div id="attach-strip"></div>
   <textarea id="editor-body" placeholder="Note body..."></textarea>
 </div>
 
@@ -71,6 +76,13 @@
       <input id="wh-url" placeholder="https://hook.eu1.make.com/...">
       <button id="wh-add">ADD</button>
     </div>
+
+    <div class="section-label" style="margin-top:14px">⚡ SUPABASE STORAGE (image/video relay, auto-deletes 60s after send)</div>
+    <div class="row"><input id="sb-url" placeholder="https://your-project.supabase.co"></div>
+    <div class="row"><input id="sb-key" type="password" placeholder="Anon / public API key"></div>
+    <div class="row"><input id="sb-bucket" placeholder="Bucket name"></div>
+    <div class="row"><button id="sb-save">SAVE SUPABASE CONFIG</button></div>
+
     <div class="row">
       <button id="modal-config-close">CLOSE</button>
     </div>

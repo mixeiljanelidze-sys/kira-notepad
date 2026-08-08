@@ -1,14 +1,15 @@
-const CACHE = 'kira-notepad-v1';
+const CACHE = 'kira-notepad-v2';
 const ASSETS = [
   './index.html',
   './style.css',
   './app.js',
   './manifest.json',
-  './services/storageService.js',
-  './services/ntfyService.js',
-  './services/notepadService.js',
-  './services/configService.js',
-  './services/webhookService.js',
+  './storageService.js',
+  './ntfyService.js',
+  './notepadService.js',
+  './configService.js',
+  './webhookService.js',
+  './supabaseService.js',
 ];
 
 self.addEventListener('install', (e) => {

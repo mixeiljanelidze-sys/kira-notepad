@@ -153,6 +153,37 @@ body {
   padding: 8px;
   margin-bottom: 6px;
 }
+#attach-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.attach-chip {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.attach-chip img { width: 100%; height: 100%; object-fit: cover; }
+.attach-chip .vid-icon { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--cyan); font-size: 20px; }
+.attach-chip .remove-x {
+  position: absolute;
+  top: 0; right: 0;
+  background: rgba(10,6,18,0.8);
+  color: #f87171;
+  width: 16px; height: 16px;
+  font-size: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+#editor-toolbar button { font-size: 10px; }
+
 .send-item.sel { border-color: var(--cyan); }
 
 #send-result { font-size: 11px; color: var(--muted); white-space: pre-wrap; margin-bottom: 8px; }

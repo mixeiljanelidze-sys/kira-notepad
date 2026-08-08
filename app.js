@@ -5,7 +5,7 @@ import { webhookService } from './webhookService.js';
 
 let activeNoteId = null;
 let pollTimer = null;
-let sendSelection = new Set();
+let saveDebounce = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,6 +17,11 @@ function showView(id) {
 function openModal(id) { $(id).classList.add('open'); }
 function closeModal(id) { $(id).classList.remove('open'); }
 
+function escapeHtml(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── NOTES LIST ────────────────────────────────────────────────
 async function renderList(filter = '') {
   const data = await notepadService.loadNotes();
   const q = filter.trim().toLowerCase();
@@ -35,17 +40,14 @@ async function renderList(filter = '') {
   });
 }
 
-function escapeHtml(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
+// ── EDITOR ────────────────────────────────────────────────────
 async function openEditor(id) {
-  const data = await notepadService.loadNotes();
-  const note = data.notes.find((n) => n.id === id);
+  const note = await notepadService.getNote(id);
   if (!note) return;
   activeNoteId = id;
   $('editor-title').value = note.title || '';
   $('editor-body').value = note.body || '';
+  renderAttachStrip(note.attachments || []);
   showView('view-editor');
 }
 
@@ -57,6 +59,58 @@ async function saveActiveNote() {
   });
 }
 
+function scheduleAutosave() {
+  clearTimeout(saveDebounce);
+  saveDebounce = setTimeout(saveActiveNote, 500);
+}
+
+function renderAttachStrip(attachments) {
+  $('attach-strip').innerHTML = attachments.map((a, i) => {
+    if (a.kind === 'image') {
+      return `<div class="attach-chip" data-idx="${i}">
+        <img src="data:${a.mime};base64,${a.image_base64}">
+        <div class="remove-x" data-idx="${i}">✕</div>
+      </div>`;
+    }
+    return `<div class="attach-chip" data-idx="${i}">
+      <div class="vid-icon">🎬</div>
+      <div class="remove-x" data-idx="${i}">✕</div>
+    </div>`;
+  }).join('');
+
+  document.querySelectorAll('#attach-strip .remove-x').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await notepadService.removeAttachment(activeNoteId, Number(btn.dataset.idx));
+      const note = await notepadService.getNote(activeNoteId);
+      renderAttachStrip(note.attachments || []);
+    });
+  });
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(',')[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+async function handleAttachFile(file, kind) {
+  if (!file || !activeNoteId) return;
+  const base64 = await fileToBase64(file);
+  const attachment = {
+    kind,
+    name: file.name,
+    mime: file.type || (kind === 'image' ? 'image/png' : 'video/mp4'),
+    [kind === 'image' ? 'image_base64' : 'video_base64']: base64,
+  };
+  const note = await notepadService.addAttachment(activeNoteId, attachment);
+  renderAttachStrip(note.attachments || []);
+}
+
+// ── NTFY HOOK RECEIVER ───────────────────────────────────────
 async function refreshHookUrl() {
   const { webhookUrl } = await ntfyService.getWebhookUrl();
   $('hook-url').value = webhookUrl;
@@ -89,6 +143,7 @@ function stopPolling() {
   setHookStatus('idle');
 }
 
+// ── WEBHOOK CONFIG ───────────────────────────────────────────
 async function renderWebhookConfig() {
   const cfg = await configService.loadConfig();
   $('webhook-list').innerHTML = cfg.webhooks.map((w) => `
@@ -107,10 +162,24 @@ async function renderWebhookConfig() {
       renderWebhookConfig();
     });
   });
+
+  $('sb-url').value = cfg.supabase.url;
+  $('sb-key').value = cfg.supabase.key;
+  $('sb-bucket').value = cfg.supabase.bucket;
 }
 
+async function saveSupabaseConfig() {
+  const cfg = await configService.loadConfig();
+  cfg.supabase = {
+    url: $('sb-url').value.trim(),
+    key: $('sb-key').value.trim(),
+    bucket: $('sb-bucket').value.trim(),
+  };
+  await configService.saveConfig(cfg);
+}
+
+// ── SEND TO WEBHOOK ──────────────────────────────────────────
 async function openSendModal() {
-  sendSelection = new Set();
   $('send-result').textContent = '';
   const cfg = await configService.loadConfig();
   if (cfg.webhooks.length === 0) {
@@ -133,19 +202,21 @@ async function executeSend() {
   const checked = Array.from(document.querySelectorAll('#send-target-list input[type=checkbox]:checked')).map((c) => c.dataset.url);
   if (checked.length === 0) { $('send-result').textContent = 'Select at least one destination.'; return; }
   await saveActiveNote();
-  const data = await notepadService.loadNotes();
-  const note = data.notes.find((n) => n.id === activeNoteId);
+  const note = await notepadService.getNote(activeNoteId);
+  const cfg = await configService.loadConfig();
   $('send-result').textContent = 'Sending...';
-  const results = await webhookService.sendToWebhooks(note, checked);
+  const results = await webhookService.sendToWebhooks(note, checked, cfg.supabase);
   $('send-result').textContent = results.map((r) => `${r.ok ? '✓' : '✗'} ${r.url} ${r.status || r.error || ''}`).join('\n');
 }
 
+// ── EVENT BINDING ────────────────────────────────────────────
 function bindEvents() {
   $('btn-new').addEventListener('click', async () => {
     const note = await notepadService.createNote();
     activeNoteId = note.id;
     $('editor-title').value = '';
     $('editor-body').value = '';
+    renderAttachStrip([]);
     showView('view-editor');
   });
 
@@ -156,6 +227,8 @@ function bindEvents() {
     renderList($('search').value);
   });
 
+  $('editor-title').addEventListener('input', scheduleAutosave);
+  $('editor-body').addEventListener('input', scheduleAutosave);
   $('editor-title').addEventListener('blur', saveActiveNote);
   $('editor-body').addEventListener('blur', saveActiveNote);
 
@@ -166,6 +239,11 @@ function bindEvents() {
     showView('view-list');
     renderList();
   });
+
+  $('btn-attach-image').addEventListener('click', () => $('file-image').click());
+  $('btn-attach-video').addEventListener('click', () => $('file-video').click());
+  $('file-image').addEventListener('change', (e) => handleAttachFile(e.target.files[0], 'image'));
+  $('file-video').addEventListener('change', (e) => handleAttachFile(e.target.files[0], 'video'));
 
   $('search').addEventListener('input', (e) => renderList(e.target.value));
 
@@ -214,6 +292,8 @@ function bindEvents() {
     $('wh-url').value = '';
     renderWebhookConfig();
   });
+
+  $('sb-save').addEventListener('click', saveSupabaseConfig);
 
   $('btn-send-webhook').addEventListener('click', openSendModal);
   $('modal-send-close').addEventListener('click', () => closeModal('modal-send'));

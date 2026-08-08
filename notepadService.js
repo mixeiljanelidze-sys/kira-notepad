@@ -35,6 +35,33 @@ async function deleteNote(id) {
   await saveNotes(data);
 }
 
+async function getNote(id) {
+  const data = await loadNotes();
+  return data.notes.find((n) => n.id === id) || null;
+}
+
+// attachment: { kind: 'image'|'video', name, mime, image_base64 | video_base64 }
+async function addAttachment(noteId, attachment) {
+  const data = await loadNotes();
+  const note = data.notes.find((n) => n.id === noteId);
+  if (!note) return null;
+  if (!note.attachments) note.attachments = [];
+  note.attachments.push(attachment);
+  note.updatedAt = Date.now();
+  await saveNotes(data);
+  return note;
+}
+
+async function removeAttachment(noteId, index) {
+  const data = await loadNotes();
+  const note = data.notes.find((n) => n.id === noteId);
+  if (!note || !note.attachments) return null;
+  note.attachments.splice(index, 1);
+  note.updatedAt = Date.now();
+  await saveNotes(data);
+  return note;
+}
+
 function buildHookTitle(msg) {
   const ts = msg.received_at
     ? new Date(msg.received_at).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })
@@ -115,4 +142,4 @@ async function ingestHookMessage(msg, { mode = 'new', ntfyService } = {}) {
   return note;
 }
 
-export const notepadService = { loadNotes, saveNotes, createNote, updateNote, deleteNote, ingestHookMessage };
+export const notepadService = { loadNotes, saveNotes, createNote, updateNote, deleteNote, getNote, addAttachment, removeAttachment, ingestHookMessage };
