@@ -3,13 +3,40 @@ import { storageService } from './storageService.js';
 const NTFY_BASE = 'https://ntfy.sh';
 const HOOK_FILE = 'kira-notepad-hook-id.json';
 
+function generateUniqueHookId() {
+  let uuid = '';
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      uuid = crypto.randomUUID().replace(/-/g, '');
+    } catch (_) {}
+  }
+  if (!uuid) {
+    const p1 = Date.now().toString(36);
+    const p2 = Math.random().toString(36).slice(2);
+    const p3 = Math.random().toString(36).slice(2);
+    uuid = (p1 + p2 + p3).padEnd(32, '0').slice(0, 32);
+  }
+  return 'kira-' + uuid;
+}
+
 async function getHookId() {
   const d = await storageService.readJson(HOOK_FILE, null);
-  if (d && d.hookId && /^kira-[a-f0-9]{32}$/.test(d.hookId)) return d.hookId;
+  if (d && d.hookId && /^kira-[a-z0-9]+$/i.test(d.hookId)) return d.hookId;
 
-  const id = 'kira-' + crypto.randomUUID().replace(/-/g, '');
+  const id = generateUniqueHookId();
   await storageService.writeJson(HOOK_FILE, { hookId: id, created: new Date().toISOString() });
   return id;
+}
+
+async function resetHookId() {
+  const id = generateUniqueHookId();
+  const d = await storageService.readJson(HOOK_FILE, {});
+  d.hookId = id;
+  d.created = new Date().toISOString();
+  d.lastNtfyId = null;
+  d.processedIds = [];
+  await storageService.writeJson(HOOK_FILE, d);
+  return { hookId: id, webhookUrl: `${NTFY_BASE}/${id}` };
 }
 
 async function getWebhookUrl() {
@@ -103,6 +130,17 @@ async function clear() {
   }
 }
 
+async function fetchAttachmentText(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const text = await res.text();
+    return { ok: true, text };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 async function fetchAttachment(url) {
   try {
     const res = await fetch(url);
@@ -125,4 +163,4 @@ function arrayBufferToBase64(buf) {
   return btoa(binary);
 }
 
-export const ntfyService = { getHookId, getWebhookUrl, poll, clear, fetchAttachment };
+export const ntfyService = { getHookId, getWebhookUrl, resetHookId, poll, clear, fetchAttachment, fetchAttachmentText };

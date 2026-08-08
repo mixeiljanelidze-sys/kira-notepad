@@ -134,12 +134,27 @@ async function resolveIncomingAttachment(entry, defaultKind, ntfyService) {
   return { kind, name, mime, url: value, [kind === 'video' ? 'video_base64' : 'image_base64']: value };
 }
 
-// Parses an incoming ntfy message. Handles JSON bodies, plain text, and ntfy attachment URLs
+// Parses an incoming ntfy message. Handles JSON bodies, plain text, ntfy attachment URLs, and .json file attachments
 async function parseIncoming(msg, ntfyService) {
-  const raw = msg.data || '';
+  let raw = msg.data || '';
   let content = raw;
   let parsedTitle = null;
   const attachments = [];
+
+  // If ntfy converted the JSON payload into a file attachment (e.g. attachment.json)
+  if (msg.attachment_url && ntfyService) {
+    const isJsonFile = /\.(json)(\?|$)/i.test(msg.attachment_url) ||
+      msg.attachment_type === 'application/json' ||
+      /\.(json)$/i.test(msg.attachment_name || '') ||
+      raw.includes('attachment.json');
+
+    if (isJsonFile) {
+      const r = await ntfyService.fetchAttachmentText(msg.attachment_url);
+      if (r.ok && r.text) {
+        raw = r.text;
+      }
+    }
+  }
 
   try {
     const parsed = JSON.parse(raw);
@@ -205,7 +220,7 @@ async function parseIncoming(msg, ntfyService) {
 
   if (msg.ntfy_title && !parsedTitle) parsedTitle = msg.ntfy_title;
 
-  if (msg.attachment_url) {
+  if (msg.attachment_url && !/\.(json)(\?|$)/i.test(msg.attachment_url)) {
     const isImg = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(msg.attachment_url) || /^image\//i.test(msg.attachment_type || '');
     const isVid = /\.(mp4|mov|webm|mkv|avi)(\?|$)/i.test(msg.attachment_url) || /^video\//i.test(msg.attachment_type || '');
     const a = await resolveIncomingAttachment(
@@ -214,7 +229,7 @@ async function parseIncoming(msg, ntfyService) {
       ntfyService
     );
     if (a) attachments.push(a);
-    else content += '\n\n' + msg.attachment_url;
+    else if (!content.includes(msg.attachment_url)) content += '\n\n' + msg.attachment_url;
   }
 
   return { isSelfEcho: false, content, parsedTitle, attachments };

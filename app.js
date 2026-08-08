@@ -326,6 +326,13 @@ function bindEvents() {
     await navigator.clipboard.writeText($('hook-url').value);
   });
 
+  $('hook-reset').addEventListener('click', async () => {
+    if (confirm('Generate a new unique webhook address for this device?')) {
+      const { webhookUrl } = await ntfyService.resetHookId();
+      $('hook-url').value = webhookUrl;
+    }
+  });
+
   $('hook-toggle').addEventListener('change', async (e) => {
     if (e.target.checked) startPolling(); else stopPolling();
     const cfg = await configService.loadConfig();
