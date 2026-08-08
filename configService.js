@@ -10,6 +10,11 @@ async function loadConfig() {
     supabase: { url: '', key: '', bucket: '' },
   });
   if (!Array.isArray(d.webhooks)) d.webhooks = [];
+  d.webhooks = d.webhooks.map((w, idx) => {
+    if (!w || typeof w !== 'object') return { id: 'w_' + Date.now() + '_' + idx, label: 'Webhook', url: '' };
+    if (!w.id) w.id = 'w_' + Date.now() + '_' + idx;
+    return w;
+  }).filter((w) => Boolean(w.url));
   if (!d.supabase) d.supabase = { url: '', key: '', bucket: '' };
   return d;
 }
@@ -20,14 +25,15 @@ async function saveConfig(cfg) {
 
 async function addWebhook(label, url) {
   const cfg = await loadConfig();
-  cfg.webhooks.push({ id: 'w' + Date.now(), label: label || url, url });
+  const id = 'w_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  cfg.webhooks.push({ id, label: label || url, url });
   await saveConfig(cfg);
   return cfg;
 }
 
-async function removeWebhook(id) {
+async function removeWebhook(idOrIndex) {
   const cfg = await loadConfig();
-  cfg.webhooks = cfg.webhooks.filter((w) => w.id !== id);
+  cfg.webhooks = cfg.webhooks.filter((w, idx) => w.id !== idOrIndex && String(idx) !== String(idOrIndex));
   await saveConfig(cfg);
   return cfg;
 }

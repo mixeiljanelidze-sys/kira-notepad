@@ -86,37 +86,55 @@ function buildHookTitle(msg, parsedTitle) {
     ? new Date(msg.received_at).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })
     : '';
   if (msg.ntfy_title && msg.ntfy_title.trim()) return 'Hook · ' + msg.ntfy_title.slice(0, 40);
-  if (parsedTitle) return 'Hook · ' + String(parsedTitle).slice(0, 40);
+  if (parsedTitle && String(parsedTitle).trim()) return 'Hook · ' + String(parsedTitle).slice(0, 40);
   const firstLine = (msg.data || '').split('\n')[0].trim();
-  if (firstLine && firstLine.length <= 50) return 'Hook · ' + firstLine;
+  if (firstLine && firstLine.length <= 50 && !firstLine.startsWith('{')) return 'Hook · ' + firstLine;
   return 'Hook · ' + ts;
 }
 
-// Fetches a single image/video entry from a webhookService-style payload
-// ({name, mime, url} or {name, mime, data}) into a note attachment.
-async function resolveIncomingAttachment(entry, kind, ntfyService) {
-  const mime = entry.mime || (kind === 'video' ? 'video/mp4' : 'image/png');
-  const name = entry.name || (kind === 'video' ? 'attachment.mp4' : 'attachment.png');
-  const value = entry.data || entry.url;
+// Fetches a single image/video entry from string or object format into a note attachment
+async function resolveIncomingAttachment(entry, defaultKind, ntfyService) {
+  if (!entry) return null;
+
+  let value = '';
+  let mime = '';
+  let name = '';
+  let kind = defaultKind || 'image';
+
+  if (typeof entry === 'string') {
+    value = entry.trim();
+  } else if (typeof entry === 'object' && entry !== null) {
+    kind = entry.kind || defaultKind || 'image';
+    mime = entry.mime || '';
+    name = entry.name || '';
+    value = entry.url || entry.data || entry.link || entry.src || entry.image_url || entry.video_url || entry.file || entry.image_base64 || entry.video_base64 || '';
+  }
+
   if (!value) return null;
+
+  mime = mime || (kind === 'video' ? 'video/mp4' : 'image/png');
+  name = name || (kind === 'video' ? 'attachment.mp4' : 'attachment.png');
 
   const isUrl = /^https?:\/\//i.test(value);
   if (!isUrl) {
-    return { kind, name, mime, [kind === 'video' ? 'video_base64' : 'image_base64']: value };
+    const rawB64 = value.startsWith('data:') ? value.split(',')[1] : value;
+    return { kind, name, mime, [kind === 'video' ? 'video_base64' : 'image_base64']: rawB64 };
   }
+
+  // Value is an HTTP/HTTPS URL
   if (ntfyService) {
     const r = await ntfyService.fetchAttachment(value);
     if (r.ok && r.dataUrl) {
       const rawB64 = r.dataUrl.split(',')[1];
-      return { kind, name, mime: r.mime || mime, [kind === 'video' ? 'video_base64' : 'image_base64']: rawB64 };
+      return { kind, name, mime: r.mime || mime, url: value, [kind === 'video' ? 'video_base64' : 'image_base64']: rawB64 };
     }
   }
-  return null;
+
+  // Fallback: If fetchAttachment fails (e.g. CORS), keep the URL so it can still be displayed!
+  return { kind, name, mime, url: value, [kind === 'video' ? 'video_base64' : 'image_base64']: value };
 }
 
-// Parses an incoming ntfy message. Handles two independent attachment sources:
-//  1. ntfy's own native attachment_url (a single file uploaded directly to ntfy)
-//  2. a JSON body shaped like webhookService's own payload (title/content/images[]/videos[])
+// Parses an incoming ntfy message. Handles JSON bodies, plain text, and ntfy attachment URLs
 async function parseIncoming(msg, ntfyService) {
   const raw = msg.data || '';
   let content = raw;
@@ -126,57 +144,88 @@ async function parseIncoming(msg, ntfyService) {
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed === 'object' && parsed !== null) {
-      const fields = ['text', 'content', 'message', 'body', 'caption', 'post', 'note', 'value', 'msg'];
+      // Self-echo detection to prevent loops when outgoing webhooks hit the receiver
+      if (parsed.source === 'KIRA Notepad Mobile') {
+        return { isSelfEcho: true, content: '', parsedTitle: null, attachments: [] };
+      }
+
+      const textFields = ['content', 'text', 'body', 'message', 'caption', 'post', 'note', 'value', 'msg', 'description', 'details'];
       let extracted = null;
-      for (const f of fields) {
+      for (const f of textFields) {
         if (parsed[f] && typeof parsed[f] === 'string' && parsed[f].trim()) {
           extracted = parsed[f];
           break;
         }
       }
-      content = extracted || JSON.stringify(parsed, null, 2);
-      if (parsed.title) parsedTitle = parsed.title;
 
-      for (const img of parsed.images || []) {
-        const a = await resolveIncomingAttachment(img, 'image', ntfyService);
+      if (parsed.title || parsed.subject) parsedTitle = parsed.title || parsed.subject;
+      content = extracted !== null ? extracted : (parsedTitle ? '' : JSON.stringify(parsed, null, 2));
+
+      // 1. Collect images
+      const imgSources = [
+        ...(Array.isArray(parsed.images) ? parsed.images : []),
+        ...(Array.isArray(parsed.image_urls) ? parsed.image_urls : []),
+        parsed.image,
+        parsed.image_url,
+      ].filter(Boolean);
+
+      for (const imgEntry of imgSources) {
+        const a = await resolveIncomingAttachment(imgEntry, 'image', ntfyService);
         if (a) attachments.push(a);
       }
-      for (const vid of parsed.videos || []) {
-        const a = await resolveIncomingAttachment(vid, 'video', ntfyService);
+
+      // 2. Collect videos
+      const vidSources = [
+        ...(Array.isArray(parsed.videos) ? parsed.videos : []),
+        ...(Array.isArray(parsed.video_urls) ? parsed.video_urls : []),
+        parsed.video,
+        parsed.video_url,
+      ].filter(Boolean);
+
+      for (const vidEntry of vidSources) {
+        const a = await resolveIncomingAttachment(vidEntry, 'video', ntfyService);
         if (a) attachments.push(a);
+      }
+
+      // 3. Fallback generic file/url fields if no attachments collected yet
+      if (attachments.length === 0) {
+        const genericUrl = parsed.url || parsed.file || parsed.file_url || parsed.media_url;
+        if (genericUrl) {
+          const isVid = /\.(mp4|mov|webm|mkv|avi)(\?|$)/i.test(String(genericUrl)) || /^video\//i.test(parsed.mime || '');
+          const a = await resolveIncomingAttachment(genericUrl, isVid ? 'video' : 'image', ntfyService);
+          if (a) attachments.push(a);
+        }
       }
     } else {
       content = String(parsed);
     }
   } catch (_) {
-    // not JSON — plain text message, content stays as raw
+    // not JSON — plain text message
   }
 
-  if (msg.ntfy_title) content = msg.ntfy_title + '\n\n' + content;
+  if (msg.ntfy_title && !parsedTitle) parsedTitle = msg.ntfy_title;
 
   if (msg.attachment_url) {
     const isImg = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(msg.attachment_url) || /^image\//i.test(msg.attachment_type || '');
     const isVid = /\.(mp4|mov|webm|mkv|avi)(\?|$)/i.test(msg.attachment_url) || /^video\//i.test(msg.attachment_type || '');
-    if (isImg || isVid) {
-      const a = await resolveIncomingAttachment(
-        { name: msg.attachment_name, mime: msg.attachment_type, url: msg.attachment_url },
-        isVid ? 'video' : 'image',
-        ntfyService
-      );
-      if (a) attachments.push(a);
-      else content += '\n\n' + msg.attachment_url;
-    } else {
-      content += '\n\n' + msg.attachment_url;
-    }
+    const a = await resolveIncomingAttachment(
+      { name: msg.attachment_name, mime: msg.attachment_type, url: msg.attachment_url },
+      isVid ? 'video' : (isImg ? 'image' : 'image'),
+      ntfyService
+    );
+    if (a) attachments.push(a);
+    else content += '\n\n' + msg.attachment_url;
   }
 
-  return { content, parsedTitle, attachments };
+  return { isSelfEcho: false, content, parsedTitle, attachments };
 }
 
 // mode: 'new' (always create note) | 'append' (append to most recent note)
 function ingestHookMessage(msg, { mode = 'new', ntfyService } = {}) {
   return enqueue(async () => {
-    const { content, parsedTitle, attachments } = await parseIncoming(msg, ntfyService);
+    const { isSelfEcho, content, parsedTitle, attachments } = await parseIncoming(msg, ntfyService);
+    if (isSelfEcho) return null;
+
     const ts = msg.received_at ? new Date(msg.received_at).toLocaleString('en-GB', { hour12: false }) : '';
     const meta = '\n\n--- received ' + ts + ' via ntfy.sh ---';
 

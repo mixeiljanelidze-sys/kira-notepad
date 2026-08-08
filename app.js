@@ -73,15 +73,34 @@ function scheduleAutosave() {
 }
 
 function renderAttachStrip(attachments) {
-  $('attach-strip').innerHTML = attachments.map((a, i) => {
+  $('attach-strip').innerHTML = (attachments || []).map((a, i) => {
+    const rawData = a.image_base64 || a.video_base64 || a.data || '';
+    const isHttp = a.url ? true : /^https?:\/\//i.test(rawData);
+    const isDataUrl = /^data:/i.test(rawData);
+
+    let imgSrc = '';
+    if (a.kind === 'image') {
+      if (a.url) imgSrc = a.url;
+      else if (isHttp || isDataUrl) imgSrc = rawData;
+      else if (rawData) imgSrc = `data:${a.mime || 'image/png'};base64,${rawData}`;
+    }
+
+    let vidSrc = '';
+    if (a.kind === 'video') {
+      if (a.url) vidSrc = a.url;
+      else if (isHttp || isDataUrl) vidSrc = rawData;
+      else if (rawData) vidSrc = `data:${a.mime || 'video/mp4'};base64,${rawData}`;
+    }
+
     if (a.kind === 'image') {
       return `<div class="attach-chip" data-idx="${i}">
-        <img src="data:${a.mime};base64,${a.image_base64}">
+        <img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(a.name || 'image')}">
         <div class="remove-x" data-idx="${i}">✕</div>
       </div>`;
     }
     return `<div class="attach-chip" data-idx="${i}">
       <div class="vid-icon">🎬</div>
+      ${vidSrc ? `<a href="${escapeHtml(vidSrc)}" target="_blank" rel="noopener" class="vid-link" style="position:absolute; bottom:2px; left:4px; color:#a78bfa; font-size:9px;">▶ LINK</a>` : ''}
       <div class="remove-x" data-idx="${i}">✕</div>
     </div>`;
   }).join('');
@@ -137,7 +156,11 @@ async function pollLoop() {
     for (const msg of r.messages) {
       await notepadService.ingestHookMessage(msg, { mode, ntfyService });
     }
-    if ($('view-list').classList.contains('active')) renderList($('search').value);
+    if ($('view-list').classList.contains('active')) {
+      renderList($('search').value);
+    } else if ($('view-editor').classList.contains('active') && activeNoteId) {
+      openEditor(activeNoteId);
+    }
   }
   setHookStatus('listening · ' + new Date().toLocaleTimeString('en-GB', { hour12: false }));
   pollTimer = setTimeout(pollLoop, 5000);
@@ -158,26 +181,28 @@ function stopPolling() {
 // ── WEBHOOK CONFIG ───────────────────────────────────────────
 async function renderWebhookConfig() {
   const cfg = await configService.loadConfig();
-  $('webhook-list').innerHTML = cfg.webhooks.map((w) => `
-    <div class="wh-item" data-id="${w.id}">
+  $('webhook-list').innerHTML = cfg.webhooks.map((w, idx) => `
+    <div class="wh-item" data-id="${escapeHtml(w.id)}">
       <div>
         <div class="wh-label">${escapeHtml(w.label)}</div>
         <div class="wh-url">${escapeHtml(w.url)}</div>
       </div>
-      <button class="wh-remove" data-id="${w.id}">✕</button>
+      <button class="wh-remove" data-id="${escapeHtml(w.id)}" data-idx="${idx}" title="Delete destination">✕</button>
     </div>
   `).join('') || '<div class="meta">No webhooks configured.</div>';
 
   document.querySelectorAll('.wh-remove').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await configService.removeWebhook(btn.dataset.id);
-      renderWebhookConfig();
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const targetId = btn.getAttribute('data-id') || btn.getAttribute('data-idx');
+      await configService.removeWebhook(targetId);
+      await renderWebhookConfig();
     });
   });
 
-  $('sb-url').value = cfg.supabase.url;
-  $('sb-key').value = cfg.supabase.key;
-  $('sb-bucket').value = cfg.supabase.bucket;
+  $('sb-url').value = cfg.supabase.url || '';
+  $('sb-key').value = cfg.supabase.key || '';
+  $('sb-bucket').value = cfg.supabase.bucket || '';
 }
 
 async function saveSupabaseConfig() {
@@ -327,7 +352,10 @@ function bindEvents() {
   $('wh-add').addEventListener('click', async () => {
     const label = $('wh-label').value.trim();
     const url = $('wh-url').value.trim();
-    if (!/^https?:\/\//.test(url)) return;
+    if (!/^https?:\/\//i.test(url)) {
+      alert('Please enter a valid URL starting with http:// or https://');
+      return;
+    }
     if (isNtfyUrl(url)) {
       alert('ntfy.sh URLs are for the ⊥ HOOK receiver only — they cannot be used as a SEND destination (4096B message limit). Add your Make.com/Pabbly/automation webhook URL instead.');
       return;
@@ -335,7 +363,7 @@ function bindEvents() {
     await configService.addWebhook(label, url);
     $('wh-label').value = '';
     $('wh-url').value = '';
-    renderWebhookConfig();
+    await renderWebhookConfig();
   });
 
   $('sb-save').addEventListener('click', saveSupabaseConfig);

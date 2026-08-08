@@ -21,6 +21,7 @@ async function poll() {
   const hookId = await getHookId();
   const d = await storageService.readJson(HOOK_FILE, {});
   const sinceId = d.lastNtfyId || 'all';
+  const processedSet = new Set(Array.isArray(d.processedIds) ? d.processedIds : []);
 
   try {
     const res = await fetch(`${NTFY_BASE}/${hookId}/json?poll=1&since=${sinceId}`, {
@@ -29,13 +30,20 @@ async function poll() {
     const raw = await res.text();
     const lines = raw.split('\n').filter((l) => l.trim());
     const messages = [];
-    let latestId = null;
+    let latestId = d.lastNtfyId || null;
 
     for (const line of lines) {
       try {
         const ev = JSON.parse(line);
         if (ev.event && ev.event !== 'message') continue;
+        if (!ev.id) continue;
+
         latestId = ev.id;
+
+        // Skip if message was already processed
+        if (processedSet.has(ev.id)) continue;
+        processedSet.add(ev.id);
+
         const msg = {
           id: ev.id,
           received_at: ev.time ? new Date(ev.time * 1000).toISOString() : new Date().toISOString(),
@@ -54,10 +62,9 @@ async function poll() {
       } catch (_) {}
     }
 
-    if (latestId) {
-      d.lastNtfyId = latestId;
-      await storageService.writeJson(HOOK_FILE, d);
-    }
+    d.lastNtfyId = latestId;
+    d.processedIds = Array.from(processedSet).slice(-300);
+    await storageService.writeJson(HOOK_FILE, d);
 
     return { messages, count: messages.length };
   } catch (e) {
@@ -74,17 +81,22 @@ async function clear() {
     const raw = await res.text();
     const lines = raw.split('\n').filter((l) => l.trim());
     let latestId = null;
+    const d = await storageService.readJson(HOOK_FILE, {});
+    const processedSet = new Set(Array.isArray(d.processedIds) ? d.processedIds : []);
+
     for (const line of lines) {
       try {
         const ev = JSON.parse(line);
-        if (ev.id) latestId = ev.id;
+        if (ev.id) {
+          latestId = ev.id;
+          processedSet.add(ev.id);
+        }
       } catch (_) {}
     }
-    if (latestId) {
-      const d = await storageService.readJson(HOOK_FILE, {});
-      d.lastNtfyId = latestId;
-      await storageService.writeJson(HOOK_FILE, d);
-    }
+
+    if (latestId) d.lastNtfyId = latestId;
+    d.processedIds = Array.from(processedSet).slice(-300);
+    await storageService.writeJson(HOOK_FILE, d);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };

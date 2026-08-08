@@ -15,28 +15,67 @@ function isNtfyHost(url) {
 function previewPayload(note, supabaseCfg) {
   const useSupabase = supabaseService.isConfigured(supabaseCfg);
   const images = (note.attachments || [])
-    .filter((a) => a.kind === 'image' && a.image_base64)
-    .map((a) => ({
-      name: a.name || 'image',
-      mime: a.mime || 'image/png',
-      data: useSupabase ? '[will upload to Supabase Storage]' : `[base64 — ${Math.round((a.image_base64.length * 0.75) / 1024)} KB]`,
-    }));
+    .filter((a) => a.kind === 'image' && (a.image_base64 || a.url))
+    .map((a) => {
+      const isHttp = a.url || /^https?:\/\//i.test(a.image_base64 || '');
+      const placeholder = isHttp ? (a.url || a.image_base64) : (useSupabase ? '[will upload to Supabase Storage]' : `[base64 — ${Math.round(((a.image_base64 || '').length * 0.75) / 1024)} KB]`);
+      return {
+        name: a.name || 'image',
+        mime: a.mime || 'image/png',
+        kind: 'image',
+        url: placeholder,
+        data: placeholder,
+        link: placeholder,
+        src: placeholder,
+      };
+    });
+
   const videos = (note.attachments || [])
-    .filter((a) => a.kind === 'video' && a.video_base64)
-    .map((a) => ({
-      name: a.name || 'video',
-      mime: a.mime || 'video/mp4',
-      data: useSupabase ? '[will upload to Supabase Storage]' : `[base64 — ${Math.round((a.video_base64.length * 0.75) / 1024)} KB]`,
-    }));
+    .filter((a) => a.kind === 'video' && (a.video_base64 || a.url))
+    .map((a) => {
+      const isHttp = a.url || /^https?:\/\//i.test(a.video_base64 || '');
+      const placeholder = isHttp ? (a.url || a.video_base64) : (useSupabase ? '[will upload to Supabase Storage]' : `[base64 — ${Math.round(((a.video_base64 || '').length * 0.75) / 1024)} KB]`);
+      return {
+        name: a.name || 'video',
+        mime: a.mime || 'video/mp4',
+        kind: 'video',
+        url: placeholder,
+        data: placeholder,
+        link: placeholder,
+        src: placeholder,
+      };
+    });
+
+  const noteTitle = (note.title || '').trim();
+  const noteBody = (note.body || '').trim();
+  const textContent = noteBody || noteTitle || 'Untitled Note';
+  const firstImg = images[0] ? images[0].url : '';
+  const firstVid = videos[0] ? videos[0].url : '';
+  const primaryMediaUrl = firstImg || firstVid || '';
 
   return {
     source: 'KIRA Notepad Mobile',
-    title: note.title || '',
-    content: note.body || '',
+    note_id: note.id || '',
+    title: noteTitle || noteBody.slice(0, 50) || 'Untitled Note',
+    content: textContent,
+    text: textContent,
+    body: noteBody,
+    caption: textContent,
+    message: textContent,
+    description: textContent,
+    url: primaryMediaUrl,
+    image_url: firstImg,
+    video_url: firstVid,
+    media_url: primaryMediaUrl,
+    image: firstImg,
+    video: firstVid,
     has_images: images.length > 0,
     images,
+    image_urls: images.map((i) => i.url),
     has_videos: videos.length > 0,
     videos,
+    video_urls: videos.map((v) => v.url),
+    media_urls: [...images.map((i) => i.url), ...videos.map((v) => v.url)],
     timestamp: new Date().toISOString(),
     studio: 'MDR Studio',
   };
@@ -52,17 +91,26 @@ async function resolveAttachments(attachments, supabaseCfg) {
     if (a.kind !== 'image' && a.kind !== 'video') continue;
     const label = a.name || a.kind;
 
+    const existingUrl = a.url || (a.image_base64 && /^https?:\/\//i.test(a.image_base64) ? a.image_base64 : null) || (a.video_base64 && /^https?:\/\//i.test(a.video_base64) ? a.video_base64 : null);
+    if (existingUrl) {
+      resolved.push({ name: a.name, mime: a.mime, kind: a.kind, data: existingUrl, url: existingUrl });
+      log.push(`✓ Attachment already has URL: ${label}`);
+      continue;
+    }
+
     if (useSupabase) {
       const r = await supabaseService.upload(supabaseCfg, a);
       if (r.ok) {
-        resolved.push({ name: a.name, mime: a.mime, kind: a.kind, data: r.url });
+        resolved.push({ name: a.name, mime: a.mime, kind: a.kind, data: r.url, url: r.url });
         uploadedPaths.push(r.path);
         log.push(`✓ Supabase upload OK: ${label}`);
         continue;
       }
       log.push(`✗ Supabase upload failed (${label}): ${r.error} — falling back to inline base64`);
     }
-    resolved.push({ name: a.name, mime: a.mime, kind: a.kind, data: a.image_base64 || a.video_base64 });
+
+    const b64 = a.image_base64 || a.video_base64;
+    resolved.push({ name: a.name, mime: a.mime, kind: a.kind, data: b64, url: b64 });
     if (!useSupabase) log.push(`→ ${label}: sent as inline base64 (no Supabase configured)`);
   }
 
@@ -72,14 +120,70 @@ async function resolveAttachments(attachments, supabaseCfg) {
 function buildPayload(note, resolvedAttachments) {
   const images = resolvedAttachments.filter((a) => a.kind === 'image');
   const videos = resolvedAttachments.filter((a) => a.kind === 'video');
+
+  const noteTitle = (note.title || '').trim();
+  const noteBody = (note.body || '').trim();
+  const textContent = noteBody || noteTitle || 'Untitled Note';
+
+  const formattedImages = images.map((img) => {
+    const mediaUrl = img.url || img.data || '';
+    return {
+      name: img.name || 'image',
+      mime: img.mime || 'image/png',
+      kind: 'image',
+      url: mediaUrl,
+      data: mediaUrl,
+      link: mediaUrl,
+      src: mediaUrl,
+    };
+  });
+
+  const formattedVideos = videos.map((vid) => {
+    const mediaUrl = vid.url || vid.data || '';
+    return {
+      name: vid.name || 'video',
+      mime: vid.mime || 'video/mp4',
+      kind: 'video',
+      url: mediaUrl,
+      data: mediaUrl,
+      link: mediaUrl,
+      src: mediaUrl,
+    };
+  });
+
+  const imageUrls = formattedImages.map((i) => i.url);
+  const videoUrls = formattedVideos.map((v) => v.url);
+  const mediaUrls = [...imageUrls, ...videoUrls];
+  const firstImg = imageUrls[0] || '';
+  const firstVid = videoUrls[0] || '';
+  const primaryMediaUrl = firstImg || firstVid || '';
+
   return {
     source: 'KIRA Notepad Mobile',
-    title: note.title || '',
-    content: note.body || '',
-    has_images: images.length > 0,
-    images,
-    has_videos: videos.length > 0,
-    videos,
+    note_id: note.id || '',
+    title: noteTitle || noteBody.slice(0, 50) || 'Untitled Note',
+    content: textContent,
+    text: textContent,
+    body: noteBody,
+    caption: textContent,
+    message: textContent,
+    description: textContent,
+
+    url: primaryMediaUrl,
+    image_url: firstImg,
+    video_url: firstVid,
+    media_url: primaryMediaUrl,
+    image: firstImg,
+    video: firstVid,
+
+    has_images: formattedImages.length > 0,
+    images: formattedImages,
+    image_urls: imageUrls,
+    has_videos: formattedVideos.length > 0,
+    videos: formattedVideos,
+    video_urls: videoUrls,
+    media_urls: mediaUrls,
+
     timestamp: new Date().toISOString(),
     studio: 'MDR Studio',
   };
@@ -93,11 +197,12 @@ function capForNtfy(payload) {
   let omitted = [];
 
   const stripIfOversized = (arr) => {
-    for (const item of arr) {
-      const isUrl = /^https?:\/\//i.test(item.data || '');
+    for (const item of arr || []) {
+      const isUrl = /^https?:\/\//i.test(item.data || item.url || '');
       if (!isUrl && item.data && item.data.length > 500) {
         omitted.push(item.name);
         item.data = '[omitted — exceeds ntfy.sh 4096B message limit; configure Supabase to send full-size files]';
+        item.url = item.data;
       }
     }
   };
