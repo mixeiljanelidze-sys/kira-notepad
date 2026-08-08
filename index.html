@@ -45,7 +45,9 @@
     <div class="section-label">YOUR WEBHOOK URL</div>
     <div class="row">
       <input id="hook-url" readonly>
-      <button id="hook-copy">COPY</button>
+    </div>
+    <div class="row">
+      <button id="hook-copy">COPY URL</button>
       <button id="hook-reset" title="Generate new unique address">NEW ID</button>
     </div>
     <div class="row">
@@ -107,7 +109,21 @@
 <script type="module" src="app.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        reg.update();
+        reg.onupdatefound = () => {
+          const w = reg.installing;
+          if (w) {
+            w.onstatechange = () => {
+              if (w.state === 'installed' && navigator.serviceWorker.controller) {
+                window.location.reload();
+              }
+            };
+          }
+        };
+      });
+    });
   }
 </script>
 </body>
