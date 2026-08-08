@@ -87,8 +87,11 @@ function buildHookTitle(msg, parsedTitle) {
     : '';
   if (msg.ntfy_title && msg.ntfy_title.trim()) return 'Hook · ' + msg.ntfy_title.slice(0, 40);
   if (parsedTitle && String(parsedTitle).trim()) return 'Hook · ' + String(parsedTitle).slice(0, 40);
+
   const firstLine = (msg.data || '').split('\n')[0].trim();
-  if (firstLine && firstLine.length <= 50 && !firstLine.startsWith('{')) return 'Hook · ' + firstLine;
+  if (firstLine && firstLine.length <= 50 && !firstLine.startsWith('{') && !/received a file/i.test(firstLine)) {
+    return 'Hook · ' + firstLine;
+  }
   return 'Hook · ' + ts;
 }
 
@@ -141,17 +144,15 @@ async function parseIncoming(msg, ntfyService) {
   let parsedTitle = null;
   const attachments = [];
 
-  // If ntfy converted the JSON payload into a file attachment (e.g. attachment.json)
+  // If ntfy converted the JSON payload into a file attachment (e.g. attachment.json or /file/<id>)
   if (msg.attachment_url && ntfyService) {
-    const isJsonFile = /\.(json)(\?|$)/i.test(msg.attachment_url) ||
-      msg.attachment_type === 'application/json' ||
-      /\.(json)$/i.test(msg.attachment_name || '') ||
-      raw.includes('attachment.json');
-
-    if (isJsonFile) {
-      const r = await ntfyService.fetchAttachmentText(msg.attachment_url);
-      if (r.ok && r.text) {
-        raw = r.text;
+    const r = await ntfyService.fetchAttachmentText(msg.attachment_url);
+    if (r.ok && r.text && r.text.trim()) {
+      const trimmed = r.text.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        raw = trimmed;
+      } else if (!raw || raw.startsWith('You received a file')) {
+        content = trimmed;
       }
     }
   }
@@ -173,8 +174,24 @@ async function parseIncoming(msg, ntfyService) {
         }
       }
 
-      if (parsed.title || parsed.subject) parsedTitle = parsed.title || parsed.subject;
-      content = extracted !== null ? extracted : (parsedTitle ? '' : JSON.stringify(parsed, null, 2));
+      if (parsed.title || parsed.subject || parsed.agent || parsed.name) {
+        parsedTitle = parsed.title || parsed.subject || parsed.agent || parsed.name;
+      }
+
+      if (extracted !== null) {
+        content = extracted;
+      } else if (parsedTitle && typeof parsedTitle === 'string') {
+        content = parsedTitle;
+      } else {
+        content = JSON.stringify(parsed, null, 2);
+      }
+
+      if (!parsedTitle && typeof content === 'string' && content.trim()) {
+        const line = content.split('\n')[0].replace(/^[#\s*_~]+/, '').trim();
+        if (line && line.length <= 60 && !line.startsWith('{')) {
+          parsedTitle = line;
+        }
+      }
 
       // 1. Collect images
       const imgSources = [
@@ -220,6 +237,10 @@ async function parseIncoming(msg, ntfyService) {
 
   if (msg.ntfy_title && !parsedTitle) parsedTitle = msg.ntfy_title;
 
+  if (typeof content === 'string' && (attachments.length > 0 || content !== raw)) {
+    content = content.replace(/^You received a file:.*$/gm, '').trim();
+  }
+
   if (msg.attachment_url && !/\.(json)(\?|$)/i.test(msg.attachment_url)) {
     const isImg = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(msg.attachment_url) || /^image\//i.test(msg.attachment_type || '');
     const isVid = /\.(mp4|mov|webm|mkv|avi)(\?|$)/i.test(msg.attachment_url) || /^video\//i.test(msg.attachment_type || '');
@@ -228,8 +249,9 @@ async function parseIncoming(msg, ntfyService) {
       isVid ? 'video' : (isImg ? 'image' : 'image'),
       ntfyService
     );
-    if (a) attachments.push(a);
-    else if (!content.includes(msg.attachment_url)) content += '\n\n' + msg.attachment_url;
+    if (a && !attachments.some((att) => att.url === a.url)) {
+      attachments.push(a);
+    }
   }
 
   return { isSelfEcho: false, content, parsedTitle, attachments };

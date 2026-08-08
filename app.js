@@ -35,13 +35,19 @@ async function renderList(filter = '') {
   const q = filter.trim().toLowerCase();
   const notes = q ? data.notes.filter((n) => (n.title + n.body).toLowerCase().includes(q)) : data.notes;
 
-  $('notes-list').innerHTML = notes.map((n) => `
-    <div class="note-card" data-id="${n.id}">
-      <div class="title">${escapeHtml(n.title || 'Untitled')}</div>
-      <div class="preview">${escapeHtml((n.body || '').slice(0, 100))}</div>
-      <div class="meta">${new Date(n.updatedAt).toLocaleString('en-GB', { hour12: false })}</div>
-    </div>
-  `).join('') || '<div class="meta">No notes yet.</div>';
+  $('notes-list').innerHTML = notes.map((n) => {
+    const hasImgs = (n.attachments || []).some((a) => a.kind === 'image');
+    const hasVids = (n.attachments || []).some((a) => a.kind === 'video');
+    const attachBadge = (hasImgs ? '🖼 ' : '') + (hasVids ? '🎬 ' : '');
+
+    return `
+      <div class="note-card" data-id="${n.id}">
+        <div class="title">${escapeHtml(n.title || 'Untitled')} ${attachBadge ? `<span style="font-size:10px; opacity:0.8; margin-left:4px;">${attachBadge}</span>` : ''}</div>
+        <div class="preview">${escapeHtml((n.body || '').slice(0, 100))}</div>
+        <div class="meta">${new Date(n.updatedAt).toLocaleString('en-GB', { hour12: false })}</div>
+      </div>
+    `;
+  }).join('') || '<div class="meta">No notes yet.</div>';
 
   document.querySelectorAll('.note-card').forEach((el) => {
     el.addEventListener('click', () => openEditor(el.dataset.id));
