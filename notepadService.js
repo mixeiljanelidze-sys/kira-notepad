@@ -257,11 +257,36 @@ async function parseIncoming(msg, ntfyService) {
   return { isSelfEcho: false, content, parsedTitle, attachments };
 }
 
+const recentHashes = new Map();
+
+function simpleHash(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(hash);
+}
+
 // mode: 'new' (always create note) | 'append' (append to most recent note)
 function ingestHookMessage(msg, { mode = 'new', ntfyService } = {}) {
   return enqueue(async () => {
     const { isSelfEcho, content, parsedTitle, attachments } = await parseIncoming(msg, ntfyService);
     if (isSelfEcho) return null;
+
+    // Drop completely empty messages (no content, no title, no attachments) to prevent ghost note creation
+    const cleanContent = (content || '').replace(/^You received a file:.*$/gm, '').trim();
+    if (!cleanContent && !parsedTitle && (!attachments || attachments.length === 0)) {
+      return null;
+    }
+
+    // Content deduplication check (prevent identical payload looping within 3 minutes)
+    const contentKey = simpleHash((parsedTitle || '') + '::' + cleanContent.slice(0, 300));
+    const now = Date.now();
+    if (recentHashes.has(contentKey) && (now - recentHashes.get(contentKey) < 180000)) {
+      return null;
+    }
+    recentHashes.set(contentKey, now);
 
     const ts = msg.received_at ? new Date(msg.received_at).toLocaleString('en-GB', { hour12: false }) : '';
     const meta = '\n\n--- received ' + ts + ' via ntfy.sh ---';
@@ -270,9 +295,9 @@ function ingestHookMessage(msg, { mode = 'new', ntfyService } = {}) {
     let note;
     if (mode === 'append' && data.notes.length > 0) {
       note = data.notes[0];
-      note.body += (note.body ? '\n\n' : '') + content + meta;
+      note.body += (note.body ? '\n\n' : '') + cleanContent + meta;
     } else {
-      note = { id: 'h' + Date.now(), title: buildHookTitle(msg, parsedTitle), body: content + meta, updatedAt: Date.now(), attachments: [] };
+      note = { id: 'h' + Date.now(), title: buildHookTitle(msg, parsedTitle), body: cleanContent + meta, updatedAt: Date.now(), attachments: [] };
       data.notes.unshift(note);
     }
     if (attachments.length > 0) {

@@ -155,32 +155,46 @@ async function refreshHookUrl() {
 
 function setHookStatus(text) { $('hook-status').textContent = text; }
 
+let pollInFlight = false;
+
 async function pollLoop() {
-  const r = await ntfyService.poll();
-  if (r.messages && r.messages.length) {
-    const mode = $('hook-mode').value;
-    for (const msg of r.messages) {
-      await notepadService.ingestHookMessage(msg, { mode, ntfyService });
+  if (pollInFlight) return;
+  pollInFlight = true;
+
+  try {
+    const r = await ntfyService.poll();
+    if (r.messages && r.messages.length) {
+      const mode = $('hook-mode').value;
+      for (const msg of r.messages) {
+        await notepadService.ingestHookMessage(msg, { mode, ntfyService });
+      }
+      if ($('view-list').classList.contains('active')) {
+        renderList($('search').value);
+      } else if ($('view-editor').classList.contains('active') && activeNoteId) {
+        openEditor(activeNoteId);
+      }
     }
-    if ($('view-list').classList.contains('active')) {
-      renderList($('search').value);
-    } else if ($('view-editor').classList.contains('active') && activeNoteId) {
-      openEditor(activeNoteId);
+    setHookStatus('listening · ' + new Date().toLocaleTimeString('en-GB', { hour12: false }));
+  } catch (_) {
+  } finally {
+    pollInFlight = false;
+    if (pollTimer !== null) {
+      pollTimer = setTimeout(pollLoop, 5000);
     }
   }
-  setHookStatus('listening · ' + new Date().toLocaleTimeString('en-GB', { hour12: false }));
-  pollTimer = setTimeout(pollLoop, 5000);
 }
 
 function startPolling() {
   if (pollTimer) return;
   setHookStatus('listening');
+  pollTimer = true; // Set placeholder so concurrent calls don't start duplicate loops
   pollLoop();
 }
 
 function stopPolling() {
-  if (pollTimer) clearTimeout(pollTimer);
+  if (pollTimer && typeof pollTimer !== 'boolean') clearTimeout(pollTimer);
   pollTimer = null;
+  pollInFlight = false;
   setHookStatus('idle');
 }
 

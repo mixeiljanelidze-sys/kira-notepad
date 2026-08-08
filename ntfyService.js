@@ -44,11 +44,13 @@ async function getWebhookUrl() {
   return { hookId, webhookUrl: `${NTFY_BASE}/${hookId}` };
 }
 
+const memoryProcessedIds = new Set();
+
 async function poll() {
   const hookId = await getHookId();
   const d = await storageService.readJson(HOOK_FILE, {});
   const sinceId = d.lastNtfyId || 'all';
-  const processedSet = new Set(Array.isArray(d.processedIds) ? d.processedIds : []);
+  const processedSet = new Set([...(Array.isArray(d.processedIds) ? d.processedIds : []), ...memoryProcessedIds]);
 
   try {
     const res = await fetch(`${NTFY_BASE}/${hookId}/json?poll=1&since=${sinceId}`, {
@@ -67,8 +69,9 @@ async function poll() {
 
         latestId = ev.id;
 
-        // Skip if message was already processed
-        if (processedSet.has(ev.id)) continue;
+        // Skip if message was already processed in memory or storage
+        if (memoryProcessedIds.has(ev.id) || processedSet.has(ev.id)) continue;
+        memoryProcessedIds.add(ev.id);
         processedSet.add(ev.id);
 
         const msg = {
