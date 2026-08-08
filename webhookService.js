@@ -1,5 +1,15 @@
 import { supabaseService } from './supabaseService.js';
 
+const NTFY_SAFE_LIMIT = 3800; // ntfy.sh hard-caps message bodies at 4096 bytes; leave margin for JSON overhead
+
+function isNtfyHost(url) {
+  try {
+    return /(^|\.)ntfy\.sh$/i.test(new URL(url).hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
 // Pure — no network calls. Mirrors desktop's _buildLivePayload: base64 is
 // replaced with a size placeholder so the preview is cheap and side-effect-free.
 function previewPayload(note, supabaseCfg) {
@@ -9,18 +19,14 @@ function previewPayload(note, supabaseCfg) {
     .map((a) => ({
       name: a.name || 'image',
       mime: a.mime || 'image/png',
-      [useSupabase ? 'url' : 'data']: useSupabase
-        ? '[will upload to Supabase Storage]'
-        : `[base64 — ${Math.round((a.image_base64.length * 0.75) / 1024)} KB]`,
+      data: useSupabase ? '[will upload to Supabase Storage]' : `[base64 — ${Math.round((a.image_base64.length * 0.75) / 1024)} KB]`,
     }));
   const videos = (note.attachments || [])
     .filter((a) => a.kind === 'video' && a.video_base64)
     .map((a) => ({
       name: a.name || 'video',
       mime: a.mime || 'video/mp4',
-      [useSupabase ? 'url' : 'data']: useSupabase
-        ? '[will upload to Supabase Storage]'
-        : `[base64 — ${Math.round((a.video_base64.length * 0.75) / 1024)} KB]`,
+      data: useSupabase ? '[will upload to Supabase Storage]' : `[base64 — ${Math.round((a.video_base64.length * 0.75) / 1024)} KB]`,
     }));
 
   return {
@@ -79,17 +85,49 @@ function buildPayload(note, resolvedAttachments) {
   };
 }
 
+// A base64 'data' field wasn't resolved to a short URL (Supabase off or failed).
+// Sending it as-is to ntfy.sh would blow the 4096B hard limit and kill the
+// ENTIRE message — text included. Strip it and leave a visible reason instead.
+function capForNtfy(payload) {
+  const capped = JSON.parse(JSON.stringify(payload));
+  let omitted = [];
+
+  const stripIfOversized = (arr) => {
+    for (const item of arr) {
+      const isUrl = /^https?:\/\//i.test(item.data || '');
+      if (!isUrl && item.data && item.data.length > 500) {
+        omitted.push(item.name);
+        item.data = '[omitted — exceeds ntfy.sh 4096B message limit; configure Supabase to send full-size files]';
+      }
+    }
+  };
+  stripIfOversized(capped.images);
+  stripIfOversized(capped.videos);
+
+  const json = JSON.stringify(capped);
+  return { capped, omitted, tooLarge: new Blob([json]).size > NTFY_SAFE_LIMIT, byteSize: new Blob([json]).size };
+}
+
 async function sendToWebhooks(note, webhookUrls, supabaseCfg) {
   const { resolved, uploadedPaths, log } = await resolveAttachments(note.attachments, supabaseCfg);
-  const payload = buildPayload(note, resolved);
+  const fullPayload = buildPayload(note, resolved);
 
   const results = [];
   for (const url of webhookUrls) {
+    let payloadToSend = fullPayload;
+
+    if (isNtfyHost(url)) {
+      const { capped, omitted, tooLarge, byteSize } = capForNtfy(fullPayload);
+      payloadToSend = capped;
+      if (omitted.length > 0) log.push(`⚠ ntfy.sh: omitted full-size data for ${omitted.join(', ')} (base64 too large for 4096B limit)`);
+      if (tooLarge) log.push(`⚠ ntfy.sh: payload still ${byteSize}B after capping — text/title may be truncated too`);
+    }
+
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadToSend),
       });
       results.push({ url, ok: res.ok, status: res.status });
     } catch (e) {
@@ -101,7 +139,7 @@ async function sendToWebhooks(note, webhookUrls, supabaseCfg) {
     for (const path of uploadedPaths) supabaseService.scheduleAutoDelete(supabaseCfg, path, 60000);
   }
 
-  return { results, log, payload };
+  return { results, log, payload: fullPayload };
 }
 
 export const webhookService = { sendToWebhooks, buildPayload, previewPayload };
