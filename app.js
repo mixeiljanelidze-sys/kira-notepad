@@ -21,6 +21,14 @@ function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function isNtfyUrl(url) {
+  try {
+    return /(^|\.)ntfy\.sh$/i.test(new URL(url).hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
 // ── NOTES LIST ────────────────────────────────────────────────
 async function renderList(filter = '') {
   const data = await notepadService.loadNotes();
@@ -300,6 +308,10 @@ function bindEvents() {
     const label = $('wh-label').value.trim();
     const url = $('wh-url').value.trim();
     if (!/^https?:\/\//.test(url)) return;
+    if (isNtfyUrl(url)) {
+      alert('ntfy.sh URLs are for the ⊥ HOOK receiver only — they cannot be used as a SEND destination (4096B message limit). Add your Make.com/Pabbly/automation webhook URL instead.');
+      return;
+    }
     await configService.addWebhook(label, url);
     $('wh-label').value = '';
     $('wh-url').value = '';
