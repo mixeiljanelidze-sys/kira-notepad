@@ -210,13 +210,24 @@ async function openSendModal() {
   openModal('modal-send');
 }
 
+let sendInFlight = false;
+
 async function executeSend() {
+  if (sendInFlight) return;
+
   const checked = Array.from(document.querySelectorAll('#send-target-list input[type=checkbox]:checked')).map((c) => c.dataset.url);
   if (checked.length === 0) { $('send-result').textContent = 'Select at least one destination.'; return; }
+
+  sendInFlight = true;
+  const btn = $('send-execute');
+  btn.disabled = true;
+  btn.textContent = '⏳ SENDING...';
+
   await saveActiveNote();
   const note = await notepadService.getNote(activeNoteId);
   const cfg = await configService.loadConfig();
   $('send-result').textContent = 'Sending...';
+
   try {
     const { results, log, payload } = await webhookService.sendToWebhooks(note, checked, cfg.supabase);
     const lines = [
@@ -227,6 +238,11 @@ async function executeSend() {
     $('send-payload-pre').textContent = JSON.stringify(payload, null, 2);
   } catch (e) {
     $('send-result').textContent = 'Send failed: ' + e.message;
+  } finally {
+    sendInFlight = false;
+    btn.disabled = false;
+    btn.textContent = 'SEND →';
+    setTimeout(() => closeModal('modal-send'), 1200);
   }
 }
 
