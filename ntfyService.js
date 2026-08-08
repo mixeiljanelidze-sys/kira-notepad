@@ -91,11 +91,11 @@ async function clear() {
   }
 }
 
-async function fetchImage(url) {
+async function fetchAttachment(url) {
   try {
     const res = await fetch(url);
     const buf = await res.arrayBuffer();
-    const mime = (res.headers.get('content-type') || 'image/png').split(';')[0].trim();
+    const mime = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
     const b64 = arrayBufferToBase64(buf);
     return { ok: true, dataUrl: `data:${mime};base64,${b64}`, mime };
   } catch (e) {
@@ -113,4 +113,4 @@ function arrayBufferToBase64(buf) {
   return btoa(binary);
 }
 
-export const ntfyService = { getHookId, getWebhookUrl, poll, clear, fetchImage };
+export const ntfyService = { getHookId, getWebhookUrl, poll, clear, fetchAttachment };
