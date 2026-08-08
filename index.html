@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KIRA Notepad</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#150e26">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="topbar">
+  <span class="brand">⚡ KIRA NOTEPAD</span>
+  <div class="topbar-actions">
+    <button id="btn-new" title="New note">+ NEW</button>
+    <button id="btn-hook" title="Webhook receiver">⟂ HOOK</button>
+    <button id="btn-config" title="Config">⚙</button>
+  </div>
+</div>
+
+<div id="view-list" class="view active">
+  <input id="search" placeholder="Search notes..." autocomplete="off">
+  <div id="notes-list"></div>
+</div>
+
+<div id="view-editor" class="view">
+  <div id="editor-toolbar">
+    <button id="btn-back">← BACK</button>
+    <button id="btn-send-webhook">⚡ SEND</button>
+    <button id="btn-delete-note">🗑</button>
+  </div>
+  <input id="editor-title" placeholder="Title">
+  <textarea id="editor-body" placeholder="Note body..."></textarea>
+</div>
+
+<div id="modal-hook" class="modal">
+  <div class="modal-box">
+    <div class="modal-title">⚡ NOTEPAD WEBHOOK RECEIVER</div>
+    <div class="section-label">YOUR WEBHOOK URL</div>
+    <div class="row">
+      <input id="hook-url" readonly>
+      <button id="hook-copy">COPY</button>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="hook-toggle"> LISTEN</label>
+      <span id="hook-status">idle</span>
+    </div>
+    <div class="row">
+      <label>Incoming mode:</label>
+      <select id="hook-mode">
+        <option value="new">New note per message</option>
+        <option value="append">Append to latest note</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="hook-clear">CLEAR QUEUE</button>
+      <button id="modal-hook-close">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-config" class="modal">
+  <div class="modal-box">
+    <div class="modal-title">⚙ WEBHOOK DESTINATIONS</div>
+    <div id="webhook-list"></div>
+    <div class="row">
+      <input id="wh-label" placeholder="Label">
+    </div>
+    <div class="row">
+      <input id="wh-url" placeholder="https://hook.eu1.make.com/...">
+      <button id="wh-add">ADD</button>
+    </div>
+    <div class="row">
+      <button id="modal-config-close">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-send" class="modal">
+  <div class="modal-box">
+    <div class="modal-title">⚡ SEND TO WEBHOOK</div>
+    <div id="send-target-list"></div>
+    <div id="send-result"></div>
+    <div class="row">
+      <button id="send-execute">SEND →</button>
+      <button id="modal-send-close">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+  }
+</script>
+</body>
+</html>
