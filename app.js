@@ -107,15 +107,19 @@ function fileToBase64(file) {
 
 async function handleAttachFile(file, kind) {
   if (!file || !activeNoteId) return;
-  const base64 = await fileToBase64(file);
-  const attachment = {
-    kind,
-    name: file.name,
-    mime: file.type || (kind === 'image' ? 'image/png' : 'video/mp4'),
-    [kind === 'image' ? 'image_base64' : 'video_base64']: base64,
-  };
-  const note = await notepadService.addAttachment(activeNoteId, attachment);
-  renderAttachStrip(note.attachments || []);
+  try {
+    const base64 = await fileToBase64(file);
+    const attachment = {
+      kind,
+      name: file.name,
+      mime: file.type || (kind === 'image' ? 'image/png' : 'video/mp4'),
+      [kind === 'image' ? 'image_base64' : 'video_base64']: base64,
+    };
+    const note = await notepadService.addAttachment(activeNoteId, attachment);
+    renderAttachStrip(note.attachments || []);
+  } catch (e) {
+    alert(`Failed to attach ${kind}: ${e.message}`);
+  }
 }
 
 // ── NTFY HOOK RECEIVER ───────────────────────────────────────

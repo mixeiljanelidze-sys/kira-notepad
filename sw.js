@@ -1,4 +1,4 @@
-const CACHE = 'kira-notepad-v2';
+const CACHE = 'kira-notepad-v3';
 const ASSETS = [
   './index.html',
   './style.css',
