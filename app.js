@@ -181,6 +181,8 @@ async function saveSupabaseConfig() {
 // ── SEND TO WEBHOOK ──────────────────────────────────────────
 async function openSendModal() {
   $('send-result').textContent = '';
+  $('send-payload-pre').style.display = 'none';
+  $('send-toggle-preview').textContent = '👁 SHOW PAYLOAD';
   const cfg = await configService.loadConfig();
   if (cfg.webhooks.length === 0) {
     $('send-target-list').innerHTML = '<div class="meta">No webhooks configured. Open ⚙ config first.</div>';
@@ -195,6 +197,8 @@ async function openSendModal() {
       </div>
     `).join('');
   }
+  const note = await notepadService.getNote(activeNoteId);
+  $('send-payload-pre').textContent = JSON.stringify(webhookService.previewPayload(note, cfg.supabase), null, 2);
   openModal('modal-send');
 }
 
@@ -205,8 +209,17 @@ async function executeSend() {
   const note = await notepadService.getNote(activeNoteId);
   const cfg = await configService.loadConfig();
   $('send-result').textContent = 'Sending...';
-  const results = await webhookService.sendToWebhooks(note, checked, cfg.supabase);
-  $('send-result').textContent = results.map((r) => `${r.ok ? '✓' : '✗'} ${r.url} ${r.status || r.error || ''}`).join('\n');
+  try {
+    const { results, log, payload } = await webhookService.sendToWebhooks(note, checked, cfg.supabase);
+    const lines = [
+      ...log,
+      ...results.map((r) => `${r.ok ? '✓' : '✗'} ${r.url} ${r.status || r.error || ''}`),
+    ];
+    $('send-result').textContent = lines.join('\n');
+    $('send-payload-pre').textContent = JSON.stringify(payload, null, 2);
+  } catch (e) {
+    $('send-result').textContent = 'Send failed: ' + e.message;
+  }
 }
 
 // ── EVENT BINDING ────────────────────────────────────────────
@@ -298,6 +311,12 @@ function bindEvents() {
   $('btn-send-webhook').addEventListener('click', openSendModal);
   $('modal-send-close').addEventListener('click', () => closeModal('modal-send'));
   $('send-execute').addEventListener('click', executeSend);
+  $('send-toggle-preview').addEventListener('click', () => {
+    const pre = $('send-payload-pre');
+    const showing = pre.style.display !== 'none';
+    pre.style.display = showing ? 'none' : 'block';
+    $('send-toggle-preview').textContent = showing ? '👁 SHOW PAYLOAD' : '🙈 HIDE PAYLOAD';
+  });
 }
 
 async function init() {

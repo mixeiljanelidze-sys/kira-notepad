@@ -186,4 +186,18 @@ body {
 
 .send-item.sel { border-color: var(--cyan); }
 
+#send-payload-pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 10px;
+  color: var(--cyan);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
 #send-result { font-size: 11px; color: var(--muted); white-space: pre-wrap; margin-bottom: 8px; }

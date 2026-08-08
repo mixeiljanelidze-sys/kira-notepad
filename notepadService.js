@@ -97,12 +97,15 @@ function buildHookTitle(msg, parsedTitle) {
 async function resolveIncomingAttachment(entry, kind, ntfyService) {
   const mime = entry.mime || (kind === 'video' ? 'video/mp4' : 'image/png');
   const name = entry.name || (kind === 'video' ? 'attachment.mp4' : 'attachment.png');
+  const value = entry.data || entry.url;
+  if (!value) return null;
 
-  if (entry.data) {
-    return { kind, name, mime, [kind === 'video' ? 'video_base64' : 'image_base64']: entry.data };
+  const isUrl = /^https?:\/\//i.test(value);
+  if (!isUrl) {
+    return { kind, name, mime, [kind === 'video' ? 'video_base64' : 'image_base64']: value };
   }
-  if (entry.url && ntfyService) {
-    const r = await ntfyService.fetchAttachment(entry.url);
+  if (ntfyService) {
+    const r = await ntfyService.fetchAttachment(value);
     if (r.ok && r.dataUrl) {
       const rawB64 = r.dataUrl.split(',')[1];
       return { kind, name, mime: r.mime || mime, [kind === 'video' ? 'video_base64' : 'image_base64']: rawB64 };
